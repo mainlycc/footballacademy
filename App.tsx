@@ -4,10 +4,13 @@ import { ViewMode, Badge } from './types';
 import Uploader from './components/Uploader';
 import Viewer from './components/Viewer';
 import BadgeList from './components/BadgeList';
-import { LayoutDashboard, ShieldCheck, ListChecks, Loader2, Cloud, AlertCircle, Database } from 'lucide-react';
+import Login from './components/Login';
+import { LayoutDashboard, ShieldCheck, ListChecks, Loader2, Cloud, AlertCircle, Database, LogOut } from 'lucide-react';
 import { getBadgesFromSupabase, uploadBadgeToSupabase, deleteBadgeFromSupabase, isSupabaseConfigured } from './db';
+import { isAuthenticated, logout } from './utils/auth';
 
 const App: React.FC = () => {
+  const [isAuthenticatedState, setIsAuthenticatedState] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('viewer');
   const [badges, setBadges] = useState<Badge[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -22,6 +25,17 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    // Sprawdź autoryzację przy starcie
+    setIsAuthenticatedState(isAuthenticated());
+  }, []);
+
+  useEffect(() => {
+    // Ładuj dane tylko jeśli użytkownik jest zalogowany
+    if (!isAuthenticatedState) {
+      setIsLoading(false);
+      return;
+    }
+
     if (!isSupabaseConfigured) {
       setIsLoading(false);
       return;
@@ -32,7 +46,7 @@ const App: React.FC = () => {
       setIsLoading(false);
     };
     init();
-  }, []);
+  }, [isAuthenticatedState]);
 
   const handleUpload = async (newBadges: any[]) => {
     setIsLoading(true);
@@ -70,6 +84,21 @@ const App: React.FC = () => {
   const handleReorder = (newOrder: Badge[]) => {
     setBadges(newOrder);
   };
+
+  const handleLoginSuccess = () => {
+    setIsAuthenticatedState(true);
+  };
+
+  const handleLogout = () => {
+    logout();
+    setIsAuthenticatedState(false);
+    setViewMode('viewer');
+  };
+
+  // Jeśli użytkownik nie jest zalogowany, pokaż panel logowania
+  if (!isAuthenticatedState) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
 
   if (!isSupabaseConfigured) {
     return (
@@ -124,20 +153,30 @@ const App: React.FC = () => {
             <div>
               <h1 className="text-lg md:text-xl font-anton tracking-widest uppercase leading-none">FOOTBALL ACADEMY</h1>
               <p className="text-[8px] font-bold uppercase tracking-[0.4em] text-blue-300 mt-0.5 flex items-center gap-1">
-                <Cloud className="w-2 h-2" /> SYSTEM CHMUROWY
+                <Cloud className="w-2 h-2" /> SYSTEM
               </p>
             </div>
           </div>
 
-          <div className="flex items-center bg-white/5 p-0.5 rounded-xl border border-white/10 overflow-x-auto max-w-full">
-            <button onClick={() => setViewMode('viewer')} className={`flex items-center gap-2 px-3 md:px-5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap ${viewMode === 'viewer' ? 'bg-white text-blue-900 shadow-xl' : 'text-blue-100 hover:bg-white/5'}`}>
-              <LayoutDashboard className="w-3 h-3" /><span>Przegląd</span>
-            </button>
-            <button onClick={() => setViewMode('list')} className={`flex items-center gap-2 px-3 md:px-5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap ${viewMode === 'list' ? 'bg-white text-blue-900 shadow-xl' : 'text-blue-100 hover:bg-white/5'}`}>
-              <ListChecks className="w-3 h-3" /><span>Lista</span>
-            </button>
-            <button onClick={() => setViewMode('uploader')} className={`flex items-center gap-2 px-3 md:px-5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap ${viewMode === 'uploader' ? 'bg-white text-blue-900 shadow-xl' : 'text-blue-100 hover:bg-white/5'}`}>
-              <ShieldCheck className="w-3 h-3" /><span>Zarządzaj</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center bg-white/5 p-0.5 rounded-xl border border-white/10 overflow-x-auto max-w-full">
+              <button onClick={() => setViewMode('viewer')} className={`flex items-center gap-2 px-3 md:px-5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap ${viewMode === 'viewer' ? 'bg-white text-blue-900 shadow-xl' : 'text-blue-100 hover:bg-white/5'}`}>
+                <LayoutDashboard className="w-3 h-3" /><span>Przegląd</span>
+              </button>
+              <button onClick={() => setViewMode('list')} className={`flex items-center gap-2 px-3 md:px-5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap ${viewMode === 'list' ? 'bg-white text-blue-900 shadow-xl' : 'text-blue-100 hover:bg-white/5'}`}>
+                <ListChecks className="w-3 h-3" /><span>Lista</span>
+              </button>
+              <button onClick={() => setViewMode('uploader')} className={`flex items-center gap-2 px-3 md:px-5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap ${viewMode === 'uploader' ? 'bg-white text-blue-900 shadow-xl' : 'text-blue-100 hover:bg-white/5'}`}>
+                <ShieldCheck className="w-3 h-3" /><span>Zarządzaj</span>
+              </button>
+            </div>
+            <button 
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap text-blue-100 hover:bg-white/10 border border-white/10 hover:border-white/20"
+              title="Wyloguj się"
+            >
+              <LogOut className="w-3 h-3" />
+              <span className="hidden md:inline">Wyloguj</span>
             </button>
           </div>
         </div>

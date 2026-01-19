@@ -260,47 +260,45 @@ export const COACH_CATEGORIES: Category[] = [
     title: "MISTRZOSTWA POLSKI FA",
     items: [
       "Udział w etapie mikroregionalnym Mistrzostw Polski FA",
+      "Każda zdobyta bramka lub czyste konto w etapie mikroregionalnym Mistrzostw Polski FA",
       "Udział w etapie makroregionalnym Mistrzostw Polski FA",
+      "Każda zdobyta bramka lub czyste konto w etapie makroregionalnym Mistrzostw Polski FA",
       { label: "Udział w finale centralnym Mistrzostw Polski FA", badge: "finalista Mistrzostw Polski FA" },
+      "Każda zdobyta bramka lub czyste konto w finale centralnym Mistrzostw Polski FA",
       { label: "Brązowy medal Mistrzostw Polski FA", badge: "II wicemistrz Polski FA" },
       { label: "Srebrny medal Mistrzostw Polski FA", badge: "wicemistrz Polski FA" },
       { label: "Złoty medal Mistrzostw Polski FA", badge: "mistrz Polski FA" },
-      "Wyróżnienie indywidualne zawodnika podczas Mistrzostw Polski FA"
+      "Wyróżnienie indywidualne MPFA",
+      { label: "Najlepszy zawodnik Mistrzostw Polski FA", badge: "najlepszy zawodnik Mistrzostw Polski FA" },
+      { label: "Król strzelców Mistrzostw Polski FA", badge: "król strzelców Mistrzostw Polski FA" },
+      "Najlepszy obrońca Mistrzostw Polski FA",
+      { label: "Najlepszy bramkarz Mistrzostw Polski FA", badge: "najlepszy bramkarz Mistrzostw Polski FA" }
     ]
   },
   {
     title: "KADRA REGIONALNA FA",
     items: [
-      { label: "Udział zawodnika w konsultacji Kadry Regionalnej FA", badge: "Wychowanek w Kadrze Regionalnej FA" },
-      "Powołanie zawodnika na Turniej Kadr Regionalnych FA",
-      { label: "Udział zawodnika w Turnieju Kadr Regionalnych FA", badge: "finalista regionalny FA" },
-      { label: "Brązowy medal zawodnika na Turnieju Kadry Regionalnej FA", badge: "II wicemistrz regionalny FA" },
-      { label: "Srebrny medal zawodnika na Turnieju Kadry Regionalnej FA", badge: "wicemistrz regionalny FA" },
-      { label: "Złoty medal zawodnika na Turnieju Kadry Regionalnej FA", badge: "mistrz regionalny FA" },
-      "Wyróżnienie indywidualne zawodnika na Turnieju Kadry Regionalnej FA",
-      "Najlepszy zawodnik Turnieju Kadr Regionalnych FA",
-      "Król strzelców Turnieju Kadr Regionalnych FA",
-      "Najlepszy bramkarz Turnieju Kadr Regionalnych FA",
-      "Organizacja konsultacji Kadry Regionalnej FA",
-      "Organizacja zgrupowania Kadry Regionalnej FA",
-      "Udział trenera w Turnieju Kadr Regionalnych FA",
-      "Brązowy medal na Turnieju Kadry Regionalnej FA",
-      "Srebrny medal na Turnieju Kadry Regionalnej FA",
-      "Złoty medal na Turnieju Kadry Regionalnej FA"
+      { label: "Udział w konsultacji Kadry Regionalnej FA", badge: "Kadrowicz Regionalny FA" },
+      "Powołanie na Turniej Kadr Regionalnych FA",
+      { label: "Udział w Turnieju Kadr Regionalnych FA", badge: "Finalista Turnieju Kadr Regionalnych" },
+      { label: "Brązowy medal Turnieju Kadr Regionalnych FA", badge: "II wicemistrz regionalny FA" },
+      { label: "Srebrny medal Turnieju Kadr Regionalnych FA", badge: "wicemistrz regionalny FA" },
+      { label: "Złoty medal Turnieju Kadr Regionalnych FA", badge: "mistrz regionalny FA" },
+      "Wyróżnienie indywidualne na Turnieju Kadr Regionalnych",
+      { label: "Najlepszy zawodnik Turnieju Kadr Regionalnych FA", badge: "Najlepszy zawodnik Turnieju Kadr Regionalnych FA" },
+      { label: "Król strzelców Turnieju Kadr Regionalnych FA", badge: "Król strzelców Turnieju Kadr Regionalnych FA" },
+      "Najlepszy obrońca Turnieju Kadr Regionalnych FA",
+      { label: "Najlepszy bramkarz Turnieju Kadr Regionalnych FA", badge: "Najlepszy bramkarz Turnieju Kadr Regionalnych FA" }
     ]
   },
   {
     title: "KADRA POLSKI FA",
     items: [
-      { label: "Powołanie zawodnika do Kadry Polski FA", badge: "wychowanek w Kadrze Polski FA" },
-      "Udział zawodnika w konsultacji Kadry Polski FA",
-      "Udział zawodnika w turnieju Kadry Polski FA",
-      "Udział zawodnika w zgrupowaniu Kadry Polski FA",
-      { label: "Udział zawodnika w obozie Kadry Polski FA", badge: "obozowicz Kadry FA" },
-      "Organizacja konsultacji Kadry Polski FA",
-      "Udział trenera w zgrupowaniu Kadry Polski FA",
-      "Udział trenera w turnieju Kadry Polskia FA",
-      "Udział trenera w obozie Kadry Polski FA"
+      { label: "Powołanie do Kadry Polski FA", badge: "kadrowicz Polski FA" },
+      "Udział w konsultacji Kadry Polski FA",
+      "Udział w turnieju Kadry Polski FA",
+      "Udział w zgrupowaniu Kadry Polski FA",
+      { label: "Udział w obozie Kadry Polski FA", badge: "obozowicz Kadry Polski FA" }
     ]
   },
   {
@@ -310,46 +308,44 @@ export const COACH_CATEGORIES: Category[] = [
       { label: "Brązowy medal Deichmanna", badge: "II wicemistrz Deichmanna" },
       { label: "Srebrny medal Deichmanna", badge: "wicemistrz Deichmanna" },
       { label: "Złoty medal Deichmanna", badge: "mistrz Deichmanna" },
-      "Udział zawodnika w finale Deichmanna",
-      "Brązowy medal zawodnika w turnieju Deichmanna",
-      "Srebrny medal zawodnika w turnieju Deichmanna",
-      "Złoty medal zawodnika w turnieju Deichmanna",
+      { label: "Najlepszy zawodnik Deichmanna", badge: "najlepszy zawodnik Deichmanna" },
+      { label: "Król strzelców Deichmanna", badge: "król strzelców Deichmanna" },
+      { label: "Najlepszy bramkarz Deichmanna", badge: "najlepszy bramkarz Deichmanna" },
       { label: "Udział w finale Tymbarka", badge: "finalista Tymbarka" },
       { label: "Brązowy medal Tymbarka", badge: "II wicemistrz Tymbarka" },
       { label: "Srebrny medal Tymbarka", badge: "wicemistrz Tymbarka" },
       { label: "Złoty medal Tymbarka", badge: "mistrz Tymbarka" },
-      "Udział zawodnika w finale Tymbarka",
-      "Brązowy medal zawodnika w turnieju Tymbarka",
-      "Srebrny medal zawodnika w turnieju Tymbarka",
-      "Złoty medal zawodnika w turnieju Tymbarka",
+      { label: "Najlepszy zawodnik Tymbarka", badge: "najlepszy zawodnik Tymbarka" },
+      { label: "Król strzelców Tymbarka", badge: "król strzelców Tymbarka" },
+      { label: "Najlepszy bramkarz Tymbarka", badge: "najlepszy bramkarz Tymbarka" },
       { label: "Udział w finale o Pucharu Prezesa PZPN", badge: "finalista Pucharu Prezesa PZPN" },
       { label: "Brązowy medal Pucharu Prezesa PZPN", badge: "II wicemistrz Pucharu Prezesa PZPN" },
       { label: "Srebrny medal Pucharu Prezesa PZPN", badge: "wicemistrz Pucharu Prezesa PZPN" },
       { label: "Złoty medal Pucharu Prezesa PZPN", badge: "mistrz Pucharu Prezesa PZPN" },
-      "Udział zawodnika w finale o Pucharu Prezesa PZPN",
-      "Brązowy medal zawodnika w turnieju Pucharu Prezesa PZPN",
-      "Srebrny medal zawodnika w turnieju Pucharu Prezesa PZPN",
-      "Złoty medal zawodnika w turnieju Pucharu Prezesa PZPN",
-      "Wyróżnienie indywidualne zawodnika podczas turnieju",
+      { label: "Najlepszy zawodnik Pucharu Prezesa PZPN", badge: "najlepszy zawodnik Pucharu Prezesa PZPN" },
+      { label: "Król strzelców Pucharu Prezesa PZPN", badge: "król strzelców Pucharu Prezesa PZPN" },
+      { label: "Najlepszy bramkarz Pucharu Prezesa PZPN", badge: "najlepszy bramkarz Pucharu Prezesa PZPN" },
+      "Wyróżnienie indywidualne",
       { label: "Powołanie do Kadry Województwa PZPN", badge: "kadrowicz województwa PZPN" },
-      { label: "Powołanie zaowdnika na LAMO", badge: "kadrowicz LAMO" },
-      { label: "Powołanie zawodnika na ZAMO", badge: "kadrowicz ZAMO" },
-      { label: "Powołanie zawodnika na WAMO", badge: "karowicz WAMO" },
-      { label: "Powołanie zawodnika na JAMO", badge: "kadrowicz JAMO" },
-      { label: "Powołanie zawodnika na Talent PRO", badge: "Talent PRO" }
+      { label: "Powołanie na LAMO", badge: "kadrowicz LAMO" },
+      { label: "Powołanie na ZAMO", badge: "kadrowicz ZAMO" },
+      { label: "Powołanie na WAMO", badge: "kadrowicz WAMO" },
+      { label: "Powołanie na JAMO", badge: "kadrowicz JAMO" },
+      { label: "Powołanie na Talent PRO", badge: "TALENT PRO" }
     ]
   },
   {
     title: "FASE",
     items: [
-      { label: "Udział w \"Dniach Próby\"", badge: "aplikant FASE" },
-      { label: "Absolwent FA w FASE", badge: "wychowanek w FASE" }
+      { label: "Udział w \"Dniach Próby\"", badge: "aplikant FASE" }
     ]
   },
   {
     title: "APLIKACJA MOBILNA",
     items: [
-      "Instalacja"
+      "Instalacja",
+      "Przeczytanie newsa ogólnego",
+      "Przeczytanie newsa edukacyjnego"
     ]
   },
   {
