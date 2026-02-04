@@ -14,12 +14,13 @@ interface Badge3DProps {
   spinTrigger: number;
   zoomLevel: number;
   isLit: boolean;
+  hideShadows?: boolean;
   onPointerDown?: (e: any) => void;
   onLoadComplete?: () => void;
 }
 
 // Wewnętrzny komponent który używa useGLTF
-const Badge3DInternal: React.FC<Badge3DProps> = ({ url, spinTrigger, zoomLevel = 0, isLit, onPointerDown, onLoadComplete }) => {
+const Badge3DInternal: React.FC<Badge3DProps> = ({ url, spinTrigger, zoomLevel = 0, isLit, hideShadows = false, onPointerDown, onLoadComplete }) => {
   // useGLTF musi być zawsze wywołany (to hook)
   // Używamy cache'owania aby uniknąć wielokrotnego ładowania tego samego modelu
   // useGLTF automatycznie obsługuje błędy przez Suspense
@@ -266,7 +267,7 @@ const Badge3DInternal: React.FC<Badge3DProps> = ({ url, spinTrigger, zoomLevel =
       </Group>
 
       <ContactShadows 
-        opacity={isLit ? 0.4 : 0.0} 
+        opacity={hideShadows ? 0.0 : (isLit ? 0.4 : 0.0)} 
         scale={10} blur={2.5} far={10} 
         position={[0, -1.8, 0]} color="#000000" 
       />
@@ -275,7 +276,7 @@ const Badge3DInternal: React.FC<Badge3DProps> = ({ url, spinTrigger, zoomLevel =
 };
 
 // Główny komponent z walidacją URL
-const Badge3D: React.FC<Badge3DProps> = React.memo(({ url, spinTrigger, zoomLevel = 0, isLit, onPointerDown, onLoadComplete }) => {
+const Badge3D: React.FC<Badge3DProps> = React.memo(({ url, spinTrigger, zoomLevel = 0, isLit, hideShadows = false, onPointerDown, onLoadComplete }) => {
   // Sprawdź czy URL jest poprawny - bardziej elastyczna walidacja
   const isValidUrl = url && typeof url === 'string' && url.trim().length > 0;
   
@@ -297,6 +298,7 @@ const Badge3D: React.FC<Badge3DProps> = React.memo(({ url, spinTrigger, zoomLeve
       spinTrigger={spinTrigger} 
       zoomLevel={zoomLevel} 
       isLit={isLit} 
+      hideShadows={hideShadows}
       onPointerDown={onPointerDown}
       onLoadComplete={onLoadComplete}
     />

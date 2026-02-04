@@ -1,11 +1,11 @@
 
 import React, { useState, Suspense, useEffect, useRef, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { Preload } from '@react-three/drei';
 import { Badge } from '../types';
 import Badge3D from './Badge3D';
 import { PLAYER_CATEGORIES, COACH_CATEGORIES, MANAGER_CATEGORIES, BadgeItem } from '../data';
-import { ChevronLeft, ChevronRight, Trophy, Loader2, Download, RotateCw, Sparkles, User, Briefcase, Award, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Trophy, Loader2, Download, RotateCw, Sparkles, User, Briefcase, Award, Trash2, Image, FileCode } from 'lucide-react';
 import { findMatchingBadge, normalize } from '../utils/badgeMatching';
 
 interface ViewerProps {
@@ -16,14 +16,90 @@ interface ViewerProps {
 
 type TabType = 'zawodnik' | 'trener' | 'manager';
 
+// Komponent wewnętrzny do przechwycenia renderera z Canvas
+const CanvasCapture: React.FC<{ 
+  onCaptureReady: (captureFn: (badgeName: string) => void) => void;
+  onSVGCaptureReady: (captureFn: (badgeName: string) => void) => void;
+}> = ({ onCaptureReady, onSVGCaptureReady }) => {
+  const { gl } = useThree();
+  const onCaptureReadyRef = useRef(onCaptureReady);
+  const onSVGCaptureReadyRef = useRef(onSVGCaptureReady);
+  
+  // Aktualizuj ref przy każdej zmianie callback
+  useEffect(() => {
+    onCaptureReadyRef.current = onCaptureReady;
+  }, [onCaptureReady]);
+  
+  useEffect(() => {
+    onSVGCaptureReadyRef.current = onSVGCaptureReady;
+  }, [onSVGCaptureReady]);
+  
+  useEffect(() => {
+    const capture = (badgeName: string) => {
+      const canvas = gl.domElement;
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `${badgeName}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+        }
+      }, 'image/png');
+    };
+    
+    const captureSVG = (badgeName: string) => {
+      const canvas = gl.domElement;
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      // Konwertuj canvas do base64
+      const base64Data = canvas.toDataURL('image/png');
+      
+      // Utwórz SVG z osadzonym obrazem
+      const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+  <image href="${base64Data}" width="100%" height="100%"/>
+</svg>`;
+      
+      // Utwórz blob z SVG
+      const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${badgeName}.svg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    };
+    
+    onCaptureReadyRef.current(capture);
+    onSVGCaptureReadyRef.current(captureSVG);
+  }, [gl]);
+  
+  return null;
+};
+
 const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [spinTrigger, setSpinTrigger] = useState(0);
   const [isLit, setIsLit] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloadingPNG, setIsDownloadingPNG] = useState(false);
+  const [isDownloadingSVG, setIsDownloadingSVG] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('zawodnik');
   const [showTooltip, setShowTooltip] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Ref do przechowywania funkcji pobierania PNG z komponentu Canvas
+  const downloadPNGRef = useRef<((badgeName: string) => void) | null>(null);
+  // Ref do przechowywania funkcji pobierania SVG z komponentu Canvas
+  const downloadSVGRef = useRef<((badgeName: string) => void) | null>(null);
   
   // Używamy wspólnej funkcji z utils/badgeMatching.ts dla synchronizacji z BadgeList
 
@@ -224,6 +300,82 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
     }
   };
 
+  const handleDownloadPNG = async () => {
+    if (!currentBadge || !downloadPNGRef.current) return;
+    
+    try {
+      setIsDownloadingPNG(true);
+      setIsCapturing(true);
+      
+      // Zapamiętaj czy światło było włączone przed wykonaniem screenshotu
+      const wasLit = isLit;
+      
+      // Jeśli światło nie jest włączone, włącz je
+      if (!isLit) {
+        setIsLit(true);
+        // Czekaj aż światło się załaduje (lerp w Badge3D potrzebuje czasu)
+        await new Promise(resolve => setTimeout(resolve, 800));
+      } else {
+        // Jeśli już jest włączone, daj chwilę na stabilizację
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // Wywołaj funkcję przechwyconą z Canvas z nazwą odznaki
+      downloadPNGRef.current(currentBadge.name);
+      
+      // Małe opóźnienie, aby upewnić się, że screenshot został wykonany
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Przywróć poprzedni stan światła (jeśli było wyłączone, wyłącz je z powrotem)
+      if (!wasLit) {
+        setIsLit(false);
+      }
+    } catch (error) {
+      console.error("Błąd pobierania PNG:", error);
+    } finally {
+      setIsDownloadingPNG(false);
+      setIsCapturing(false);
+    }
+  };
+
+  const handleDownloadSVG = async () => {
+    if (!currentBadge || !downloadSVGRef.current) return;
+    
+    try {
+      setIsDownloadingSVG(true);
+      setIsCapturing(true);
+      
+      // Zapamiętaj czy światło było włączone przed wykonaniem screenshotu
+      const wasLit = isLit;
+      
+      // Jeśli światło nie jest włączone, włącz je
+      if (!isLit) {
+        setIsLit(true);
+        // Czekaj aż światło się załaduje (lerp w Badge3D potrzebuje czasu)
+        await new Promise(resolve => setTimeout(resolve, 800));
+      } else {
+        // Jeśli już jest włączone, daj chwilę na stabilizację
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // Wywołaj funkcję przechwyconą z Canvas z nazwą odznaki
+      downloadSVGRef.current(currentBadge.name);
+      
+      // Małe opóźnienie, aby upewnić się, że screenshot został wykonany
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Przywróć poprzedni stan światła (jeśli było wyłączone, wyłącz je z powrotem)
+      if (!wasLit) {
+        setIsLit(false);
+      }
+    } catch (error) {
+      console.error("Błąd pobierania SVG:", error);
+    } finally {
+      setIsDownloadingSVG(false);
+      setIsCapturing(false);
+    }
+  };
+
   const handleRemove = async () => {
     if (!onRemove || !currentItem?.badge) return;
     
@@ -265,12 +417,17 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
             onPointerMissed={() => setIsLit(false)}
           >
             <Suspense fallback={null}>
+              <CanvasCapture 
+                onCaptureReady={(fn) => { downloadPNGRef.current = fn; }} 
+                onSVGCaptureReady={(fn) => { downloadSVGRef.current = fn; }}
+              />
               <Badge3D 
                 key={currentBadge.id}
                 url={badgeUrl} 
                 spinTrigger={spinTrigger} 
                 zoomLevel={Number(currentBadge.zoom_level ?? 0)} 
                 isLit={isLit}
+                hideShadows={isCapturing}
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   setIsLit(true);
@@ -371,16 +528,36 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
             </button>
           </div>
           
-          <div className="grid grid-cols-2 gap-3 flex-shrink-0">
+          <div className="grid grid-cols-3 gap-3 flex-shrink-0">
             <button 
               onClick={handleDownloadGLB} 
               disabled={isDownloading || !hasBadge} 
               className="py-5 bg-blue-800/20 text-white border border-white/10 rounded-2xl font-anton text-[11px] uppercase tracking-[0.2em] hover:bg-white hover:text-blue-900 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center flex-shrink-0 gap-2"
             >
               {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} 
-              POBIERZ
+              GLB
             </button>
             
+            <button 
+              onClick={handleDownloadPNG} 
+              disabled={isDownloadingPNG || !hasBadge} 
+              className="py-5 bg-blue-800/20 text-white border border-white/10 rounded-2xl font-anton text-[11px] uppercase tracking-[0.2em] hover:bg-white hover:text-blue-900 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center flex-shrink-0 gap-2"
+            >
+              {isDownloadingPNG ? <Loader2 className="w-4 h-4 animate-spin" /> : <Image className="w-4 h-4" />} 
+              PNG
+            </button>
+            
+            <button 
+              onClick={handleDownloadSVG} 
+              disabled={isDownloadingSVG || !hasBadge} 
+              className="py-5 bg-blue-800/20 text-white border border-white/10 rounded-2xl font-anton text-[11px] uppercase tracking-[0.2em] hover:bg-white hover:text-blue-900 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center flex-shrink-0 gap-2"
+            >
+              {isDownloadingSVG ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCode className="w-4 h-4" />} 
+              SVG
+            </button>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-3 flex-shrink-0">
             {onRemove && hasBadge && (
               <button 
                 onClick={handleRemove} 
