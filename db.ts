@@ -14,28 +14,37 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
 const BUCKET_NAME = 'badges';
 const TABLE_NAME = 'badges';
 
+const LOCAL_VERSION_PREFIX = 'fa_badge_version:'; // key: fa_badge_version:<file_path>
+
+const getLocalFileVersion = (filePath: string): string | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(LOCAL_VERSION_PREFIX + filePath);
+  } catch {
+    return null;
+  }
+};
+
+const setLocalFileVersion = (filePath: string, version: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(LOCAL_VERSION_PREFIX + filePath, version);
+  } catch {
+    // ignore
+  }
+};
+
 export const uploadBadgeToSupabase = async (file: File, name: string): Promise<any> => {
-  if (!supabase) throw new Error("Supabase is not configured");
+  // Opcja B: zapis do Supabase tylko przez backend (service role),
+  // żeby anon key w przeglądarce nie łamał RLS.
+  const form = new FormData();
+  form.append('name', name);
+  form.append('file', file);
 
-  const fileExt = file.name.split('.').pop();
-  const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
-  const filePath = `${fileName}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from(BUCKET_NAME)
-    .upload(filePath, file);
-
-  if (uploadError) throw uploadError;
-
-  const { data, error: dbError } = await supabase
-    .from(TABLE_NAME)
-    .insert([{ name, file_path: filePath, zoom_level: 0 }])
-    .select()
-    .single();
-
-  if (dbError) throw dbError;
-
-  return data;
+  const res = await fetch('/api/badges/upload', { method: 'POST', body: form });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || 'Błąd uploadu (API)');
+  return json.data;
 };
 
 export const getBadgesFromSupabase = async (): Promise<any[]> => {
@@ -48,40 +57,91 @@ export const getBadgesFromSupabase = async (): Promise<any[]> => {
 
   if (error) throw error;
 
-  return data.map(item => ({
-    id: item.id,
-    name: item.name,
-    url: supabase!.storage.from(BUCKET_NAME).getPublicUrl(item.file_path).data.publicUrl,
-    file_path: item.file_path,
-    zoom_level: parseFloat(item.zoom_level ?? 0)
-  }));
+  return data.map(item => {
+    const baseUrl = supabase!.storage.from(BUCKET_NAME).getPublicUrl(item.file_path).data.publicUrl;
+    // Cache-buster:
+    // - preferuj wersję ustawioną lokalnie po zapisie pliku (nie wymaga UPDATE w DB, omija RLS)
+    // - fallback: created_at/updated_at jeśli dostępne w schemacie.
+    const localVersion = typeof item.file_path === 'string' ? getLocalFileVersion(item.file_path) : null;
+    const version = localVersion || item.updated_at || item.created_at || '';
+    const url = version ? `${baseUrl}?v=${encodeURIComponent(version)}` : baseUrl;
+    return {
+      id: item.id,
+      name: item.name,
+      url,
+      file_path: item.file_path,
+      zoom_level: parseFloat(item.zoom_level ?? 0)
+    };
+  });
 };
 
 export const updateBadgeZoomLevel = async (id: string, level: number): Promise<void> => {
-  if (!supabase) throw new Error("Supabase is not configured");
-
-  // level jest teraz floatem przekazywanym bezpośrednio do bazy
-  const { error } = await supabase
-    .from(TABLE_NAME)
-    .update({ zoom_level: level })
-    .eq('id', id);
-
-  if (error) throw error;
+  const res = await fetch('/api/badges/zoom', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, level })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || 'Błąd zapisu zoom (API)');
 };
 
 export const deleteBadgeFromSupabase = async (id: string, filePath: string): Promise<void> => {
-  if (!supabase) throw new Error("Supabase is not configured");
+  const res = await fetch('/api/badges/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, filePath })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || 'Błąd usuwania (API)');
+};
 
-  const { error: dbError } = await supabase
-    .from(TABLE_NAME)
-    .delete()
-    .eq('id', id);
+/**
+ * Nadpisuje istniejący plik GLB w Storage (zachowując tę samą ścieżkę).
+ * Po zapisie aktualizuje `updated_at` w tabeli, dzięki czemu
+ * `getBadgesFromSupabase` zwróci nowy cache-buster w URL.
+ */
+export const replaceBadgeFile = async (
+  id: string,
+  filePath: string,
+  file: Blob | File
+): Promise<void> => {
+  const form = new FormData();
+  form.append('filePath', filePath);
+  // Blob → File dla czytelnego mimetype
+  const asFile = file instanceof File ? file : new File([file], 'badge.glb', { type: 'model/gltf-binary' });
+  form.append('file', asFile);
 
-  if (dbError) throw dbError;
+  const res = await fetch('/api/badges/replace-file', { method: 'POST', body: form });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || 'Błąd zapisu pliku (API)');
 
-  const { error: storageError } = await supabase.storage
-    .from(BUCKET_NAME)
-    .remove([filePath]);
+  setLocalFileVersion(filePath, String(Date.now()));
+};
 
-  if (storageError) console.warn("Storage removal error:", storageError);
+/**
+ * Pobiera dowolny plik JSON z bucket-u `badges`.
+ * Zwraca `null`, jeśli plik nie istnieje (np. paleta jeszcze nie utworzona).
+ */
+export const loadJsonFromStorage = async <T = any>(path: string): Promise<T | null> => {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.storage.from(BUCKET_NAME).download(path);
+    if (error || !data) return null;
+    const text = await data.text();
+    if (!text) return null;
+    return JSON.parse(text) as T;
+  } catch (err) {
+    console.warn(`loadJsonFromStorage(${path}) failed:`, err);
+    return null;
+  }
+};
+
+export const saveJsonToStorage = async (path: string, value: unknown): Promise<void> => {
+  const res = await fetch('/api/storage/save-json', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, value })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || 'Błąd zapisu JSON (API)');
 };

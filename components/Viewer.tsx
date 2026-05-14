@@ -1,12 +1,15 @@
 
-import React, { useState, Suspense, useEffect, useRef, useMemo } from 'react';
+import React, { useState, Suspense, useEffect, useRef, useMemo, useCallback } from 'react';
+import * as THREE from 'three';
 import { Canvas, useThree } from '@react-three/fiber';
 import { Preload } from '@react-three/drei';
 import { Badge } from '../types';
 import Badge3D from './Badge3D';
+import BadgeColorPanel from './BadgeColorPanel';
 import { PLAYER_CATEGORIES, COACH_CATEGORIES, MANAGER_CATEGORIES, BadgeItem } from '../data';
 import { ChevronLeft, ChevronRight, Trophy, Loader2, Download, RotateCw, Sparkles, User, Briefcase, Award, Trash2, Image, FileCode } from 'lucide-react';
 import { findMatchingBadge, normalize } from '../utils/badgeMatching';
+import { useAdminMode, disableAdminMode } from '../utils/adminMode';
 
 interface ViewerProps {
   badges: Badge[];
@@ -85,6 +88,8 @@ const CanvasCapture: React.FC<{
 };
 
 const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
+  const adminMode = useAdminMode();
+  const [editScene, setEditScene] = useState<THREE.Object3D | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [spinTrigger, setSpinTrigger] = useState(0);
   const [isLit, setIsLit] = useState(false);
@@ -95,6 +100,15 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
   const [activeTab, setActiveTab] = useState<TabType>('zawodnik');
   const [showTooltip, setShowTooltip] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Reset sceny edycji gdy zmienia się odznaka lub tryb admina.
+  const handleSceneReady = useCallback((scene: THREE.Object3D) => {
+    setEditScene(scene);
+  }, []);
+
+  useEffect(() => {
+    if (!adminMode) setEditScene(null);
+  }, [adminMode]);
   
   // Ref do przechowywania funkcji pobierania PNG z komponentu Canvas
   const downloadPNGRef = useRef<((badgeName: string) => void) | null>(null);
@@ -397,7 +411,7 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto flex flex-col md:flex-row items-stretch gap-6 h-[75vh]">
+    <div className={`w-full ${adminMode ? 'max-w-[1500px]' : 'max-w-7xl'} mx-auto flex flex-col md:flex-row items-stretch gap-6 h-[75vh]`}>
       <div className="relative flex-[3] bg-black rounded-[40px] border border-white/10 overflow-hidden shadow-2xl group/viewer">
         {/* Loader overlay - pokazuj tylko gdy jest odznaka */}
         {isLoading && hasBadge && (
@@ -428,6 +442,8 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
                 zoomLevel={Number(currentBadge.zoom_level ?? 0)} 
                 isLit={isLit}
                 hideShadows={isCapturing}
+                adminMode={adminMode}
+                onSceneReady={adminMode ? handleSceneReady : undefined}
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   setIsLit(true);
@@ -614,6 +630,23 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
           </div>
         </div>
       </div>
+
+      {adminMode && (
+        <div className="w-full md:w-[360px] flex-shrink-0 bg-blue-950/60 backdrop-blur-xl border border-amber-400/20 rounded-[32px] shadow-2xl p-4 overflow-hidden flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => disableAdminMode()}
+            className="shrink-0 text-[9px] font-bold uppercase tracking-widest text-blue-200/70 hover:text-white py-2 px-2 rounded-lg border border-white/10 hover:bg-white/5 transition text-left"
+          >
+            Wyłącz edycję kolorów
+          </button>
+          <BadgeColorPanel
+            badge={hasBadge ? currentBadge : null}
+            scene={editScene}
+            onSaved={onRefresh}
+          />
+        </div>
+      )}
     </div>
   );
 };

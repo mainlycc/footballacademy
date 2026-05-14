@@ -1,19 +1,55 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { ViewMode, Badge } from './types';
 import Uploader from './components/Uploader';
 import Viewer from './components/Viewer';
 import BadgeList from './components/BadgeList';
 import Login from './components/Login';
+import AdminEntryPage from './components/AdminEntryPage';
+import { isAdminEntryPath, isAdminEditingEnabled } from './utils/adminMode';
 import { LayoutDashboard, ShieldCheck, ListChecks, Loader2, Cloud, AlertCircle, Database, LogOut } from 'lucide-react';
 import { getBadgesFromSupabase, uploadBadgeToSupabase, deleteBadgeFromSupabase, isSupabaseConfigured } from './db';
 import { isAuthenticated, logout } from './utils/auth';
 
 const App: React.FC = () => {
   const [isAuthenticatedState, setIsAuthenticatedState] = useState(false);
+  const [routePath, setRoutePath] = useState(() => {
+    if (typeof window === 'undefined') return '/';
+    const p = window.location.pathname;
+    // Produkcja: /admin1 nie istnieje — traktuj jak główną (URL poprawimy w layout effect)
+    if (!import.meta.env.DEV && isAdminEntryPath(p)) return '/';
+    return p;
+  });
   const [viewMode, setViewMode] = useState<ViewMode>('viewer');
   const [badges, setBadges] = useState<Badge[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  const navigateToAppRoot = () => {
+    window.history.replaceState({}, '', '/');
+    setRoutePath('/');
+  };
+
+  useEffect(() => {
+    const onPop = () => {
+      const p = window.location.pathname;
+      if (!import.meta.env.DEV && isAdminEntryPath(p)) {
+        window.history.replaceState({}, '', '/');
+        setRoutePath('/');
+        return;
+      }
+      setRoutePath(p);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (import.meta.env.DEV) return;
+    if (isAdminEntryPath(window.location.pathname)) {
+      window.history.replaceState({}, '', '/');
+      setRoutePath('/');
+    }
+  }, []);
 
   const refreshBadges = async () => {
     try {
@@ -98,6 +134,11 @@ const App: React.FC = () => {
   // Jeśli użytkownik nie jest zalogowany, pokaż panel logowania
   if (!isAuthenticatedState) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // Ukryte wejście do edycji kolorów — tylko w dev (`npm run dev`), brak linku w UI
+  if (isAdminEditingEnabled() && isAdminEntryPath(routePath)) {
+    return <AdminEntryPage onLeave={navigateToAppRoot} />;
   }
 
   if (!isSupabaseConfigured) {
@@ -189,9 +230,9 @@ const App: React.FC = () => {
           ) : viewMode === 'list' ? (
             <BadgeList badges={badges} />
           ) : (
-            <Uploader 
-              badges={badges} 
-              onUpload={handleUpload} 
+            <Uploader
+              badges={badges}
+              onUpload={handleUpload}
               onRemove={handleRemove}
               onReorder={handleReorder}
               onSupabaseUpload={handleSupabaseUpload}
