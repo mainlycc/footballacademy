@@ -44,7 +44,7 @@ interface ViewerProps {
 }
 
 type TabType = CatalogTab;
-type AdminPanelTab = 'kolory' | 'swiatlo' | 'uklad';
+type AdminPanelTab = 'kolory' | 'swiatlo' | 'uklad' | 'kolekcja';
 
 // Komponent wewnętrzny do przechwycenia renderera z Canvas
 const CanvasCapture: React.FC<{ 
@@ -336,6 +336,84 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
     },
     [activeTab, currentIndex, allItems, persistViewerPosition]
   );
+
+  const CatalogTabs = useMemo(() => {
+    const tabs = [
+      { id: 'zawodnik' as TabType, label: 'Zawodnik', icon: User },
+      { id: 'trener' as TabType, label: 'Trener', icon: Briefcase },
+      { id: 'manager' as TabType, label: 'Manager', icon: Award },
+    ];
+
+    return (
+      <div className="flex p-1 bg-black/40 rounded-xl border border-white/10">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => handleActiveTabChange(tab.id)}
+            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-bold uppercase text-[9px] tracking-widest transition-all ${
+              activeTab === tab.id
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <tab.icon className="w-3 h-3" /> {tab.label}
+          </button>
+        ))}
+      </div>
+    );
+  }, [activeTab, handleActiveTabChange]);
+
+  const CollectionPreview = useMemo(() => {
+    return (
+      <>
+        <div className="flex items-center justify-between text-blue-400 font-bold uppercase tracking-[0.4em] text-[10px]">
+          <span className="flex items-center gap-2">
+            <Trophy className="w-3 h-3" /> KOLEKCJA {currentIndex + 1} / {allItems.length}
+          </span>
+        </div>
+        <div
+          className="max-h-36 overflow-y-auto overflow-x-hidden rounded-xl border border-white/10 bg-black/30 p-1 space-y-0.5"
+          role="listbox"
+          aria-label="Lista odznak w kolekcji"
+        >
+          {allItems.map((item, idx) => {
+            const isActive = idx === currentIndex;
+            const hasItemBadge = Boolean(item.badge?.url?.trim());
+            const showCategory = idx === 0 || allItems[idx - 1].categoryTitle !== item.categoryTitle;
+            return (
+              <React.Fragment key={item.itemKey}>
+                {showCategory && (
+                  <div className="px-2 pt-2 pb-0.5 text-[8px] font-bold uppercase tracking-widest text-blue-400/80 sticky top-0 bg-black/90 backdrop-blur-sm z-10">
+                    {item.categoryTitle}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={isActive}
+                  ref={isActive ? activeCatalogItemRef : undefined}
+                  onClick={() => jumpToIndex(idx)}
+                  title={hasItemBadge ? item.label : `${item.label} — brak odznaki w bazie`}
+                  className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-medium leading-tight transition-all truncate ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : hasItemBadge
+                        ? 'text-gray-300 hover:bg-white/10'
+                        : 'text-red-300/70 hover:bg-red-500/10'
+                  }`}
+                >
+                  <span className="block truncate">{item.label}</span>
+                </button>
+              </React.Fragment>
+            );
+          })}
+        </div>
+        <p className="text-[9px] text-gray-500 uppercase tracking-wider">
+          Kliknij pozycję lub użyj ← → — nie musisz czekać na załadowanie
+        </p>
+      </>
+    );
+  }, [allItems, currentIndex, jumpToIndex]);
   
   // Ref do zapamiętania nazwy odznaki przed usunięciem (do znalezienia następnej o tej samej nazwie)
   const nextBadgeNameRef = useRef<string | null>(null);
@@ -825,72 +903,7 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
 
         {/* Dolna sekcja - przyklejona do dołu */}
         <div className="mt-auto pt-8 border-t border-white/10 space-y-4 flex-shrink-0">
-          {/* Tabs */}
-          <div className="flex p-1 bg-black/40 rounded-xl border border-white/10">
-            {[
-              { id: 'zawodnik' as TabType, label: 'Zawodnik', icon: User },
-              { id: 'trener' as TabType, label: 'Trener', icon: Briefcase },
-              { id: 'manager' as TabType, label: 'Manager', icon: Award }
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => handleActiveTabChange(tab.id)}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-bold uppercase text-[9px] tracking-widest transition-all ${
-                  activeTab === tab.id 
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' 
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <tab.icon className="w-3 h-3" /> {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Kolekcja info - pokazujemy wszystkie items z kategorii */}
-          <div className="flex items-center justify-between text-blue-400 font-bold uppercase tracking-[0.4em] text-[10px]">
-             <span className="flex items-center gap-2"><Trophy className="w-3 h-3" /> KOLEKCJA {currentIndex + 1} / {allItems.length}</span>
-          </div>
-          <div
-            className="max-h-36 overflow-y-auto overflow-x-hidden rounded-xl border border-white/10 bg-black/30 p-1 space-y-0.5"
-            role="listbox"
-            aria-label="Lista odznak w kolekcji"
-          >
-            {allItems.map((item, idx) => {
-              const isActive = idx === currentIndex;
-              const hasItemBadge = Boolean(item.badge?.url?.trim());
-              const showCategory =
-                idx === 0 || allItems[idx - 1].categoryTitle !== item.categoryTitle;
-              return (
-                <React.Fragment key={item.itemKey}>
-                  {showCategory && (
-                    <div className="px-2 pt-2 pb-0.5 text-[8px] font-bold uppercase tracking-widest text-blue-400/80 sticky top-0 bg-black/90 backdrop-blur-sm z-10">
-                      {item.categoryTitle}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={isActive}
-                    ref={isActive ? activeCatalogItemRef : undefined}
-                    onClick={() => jumpToIndex(idx)}
-                    title={hasItemBadge ? item.label : `${item.label} — brak odznaki w bazie`}
-                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-medium leading-tight transition-all truncate ${
-                      isActive
-                        ? 'bg-blue-600 text-white shadow-md'
-                        : hasItemBadge
-                          ? 'text-gray-300 hover:bg-white/10'
-                          : 'text-red-300/70 hover:bg-red-500/10'
-                    }`}
-                  >
-                    <span className="block truncate">{item.label}</span>
-                  </button>
-                </React.Fragment>
-              );
-            })}
-          </div>
-          <p className="text-[9px] text-gray-500 uppercase tracking-wider">
-            Kliknij pozycję lub użyj ← → — nie musisz czekać na załadowanie
-          </p>
+          {CatalogTabs}
         </div>
       </div>
 
@@ -937,9 +950,25 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
             >
               <LayoutGrid className="w-3 h-3" /> Układ
             </button>
+            <button
+              type="button"
+              onClick={() => setAdminPanelTab('kolekcja')}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg font-bold uppercase text-[9px] tracking-widest transition-all ${
+                adminPanelTab === 'kolekcja'
+                  ? 'bg-amber-500/90 text-black shadow-lg'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Trophy className="w-3 h-3" /> Kolekcja
+            </button>
           </div>
           <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
-            {adminPanelTab === 'kolory' ? (
+            {adminPanelTab === 'kolekcja' ? (
+              <div className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden p-1">
+                <div className="shrink-0">{CatalogTabs}</div>
+                <div className="min-h-0 flex-1 overflow-hidden">{CollectionPreview}</div>
+              </div>
+            ) : adminPanelTab === 'kolory' ? (
               <BadgeColorPanel
                 badge={hasBadge ? currentBadge : null}
                 scene={editScene}
