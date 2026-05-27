@@ -4,7 +4,14 @@ import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: new URL('./.env', import.meta.url) });
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, '..');
+dotenv.config({ path: path.join(projectRoot, '.env.local') });
+dotenv.config({ path: path.join(projectRoot, '.env') });
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5179;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -122,6 +129,24 @@ app.post('/api/badges/delete', async (req, res) => {
 
     const { error: storageError } = await supabase.storage.from(BUCKET).remove([filePath]);
     if (storageError) return res.status(500).json({ error: storageError.message });
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/badges/rename', async (req, res) => {
+  try {
+    const { id, name } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'id required' });
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'name required' });
+
+    const { error } = await supabase
+      .from(TABLE)
+      .update({ name: String(name).trim() })
+      .eq('id', id);
+    if (error) return res.status(500).json({ error: error.message });
 
     res.json({ ok: true });
   } catch (e) {

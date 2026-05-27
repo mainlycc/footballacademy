@@ -13,8 +13,17 @@ export const normalize = (text: string): string => {
     .trim();
 };
 
+export type FindMatchingBadgeOptions = {
+  /** Tylko równość znormalizowanych nazw (np. pozycje z sufiksem „ FA”). */
+  exact?: boolean;
+};
+
 // Funkcja dopasowania odznaki (używana w BadgeList i Viewer)
-export const findMatchingBadge = (item: BadgeItem, allBadges: Badge[]): Badge | null => {
+export const findMatchingBadge = (
+  item: BadgeItem,
+  allBadges: Badge[],
+  options?: FindMatchingBadgeOptions
+): Badge | null => {
   const label = typeof item === 'string' ? item : item.label;
   const badgeName = typeof item === 'object' ? item.badge : null;
 
@@ -30,6 +39,12 @@ export const findMatchingBadge = (item: BadgeItem, allBadges: Badge[]): Badge | 
 
   return allBadges.find(uploadedBadge => {
     const uploadedName = normalize(uploadedBadge.name);
+
+    if (options?.exact) {
+      if (normalizedBadgeName && uploadedName === normalizedBadgeName) return true;
+      if (uploadedName === normalizedLabel) return true;
+      return false;
+    }
 
     // 1. Sprawdź czy nazwa pliku pasuje do "Odznaki" (jeśli zdefiniowana)
     if (normalizedBadgeName && uploadedName === normalizedBadgeName) return true;

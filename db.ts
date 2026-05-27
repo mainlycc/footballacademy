@@ -75,6 +75,16 @@ export const getBadgesFromSupabase = async (): Promise<any[]> => {
   });
 };
 
+export const updateBadgeName = async (id: string, name: string): Promise<void> => {
+  const res = await fetch('/api/badges/rename', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, name: name.trim() })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || 'Błąd zmiany nazwy (API)');
+};
+
 export const updateBadgeZoomLevel = async (id: string, level: number): Promise<void> => {
   const res = await fetch('/api/badges/zoom', {
     method: 'POST',

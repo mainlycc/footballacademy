@@ -9,19 +9,109 @@
  *   parsuje przez `GLTFLoader`, aplikuje zmiany kolorów i zwraca binarny GLB
  *   (Blob `model/gltf-binary`) gotowy do uploadu.
  *
- * Zmieniamy WYŁĄCZNIE `material.color`. Tekstury są zostawiane bez zmian
- * (kolor zaszyty w pikselach jest traktowany jako "nie do edycji").
+ * Zmieniamy `material.color` oraz transformację mapy diffuse (`material.map`).
  */
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { applyTransformChanges, type MeshTransformChange } from './glbMeshLayout';
+import {
+  applyPremultipliedAlphaBlending,
+  sanitizeBadgeMapTexture,
+  sanitizeBadgeMapTextureWhenReady
+} from './textureAlphaFix';
+
+export interface TextureTransformState {
+  repeatX: number;
+  repeatY: number;
+  offsetX: number;
+  offsetY: number;
+  /** Radiany (Three.js `texture.rotation`). */
+  rotation: number;
+  wrapS: number;
+  wrapT: number;
+  flipY: boolean;
+}
+
+export const DEFAULT_TEXTURE_TRANSFORM: TextureTransformState = {
+  repeatX: 1,
+  repeatY: 1,
+  offsetX: 0,
+  offsetY: 0,
+  rotation: 0,
+  // Domyślnie nie powielamy (brak „dublowania logo” i brak szwów na krawędziach).
+  wrapS: THREE.ClampToEdgeWrapping,
+  wrapT: THREE.ClampToEdgeWrapping,
+  flipY: true
+};
+
+export const TEXTURE_WRAP_LABELS: { value: number; label: string }[] = [
+  // Zostawiamy tylko tryb bez powielania — „powtarzaj/lustro” powodują dublowanie logo.
+  { value: THREE.ClampToEdgeWrapping, label: 'Przycinaj' }
+];
+
+type TextureSlotKey = 'map' | 'emissiveMap' | 'normalMap' | 'roughnessMap' | 'metalnessMap';
+
+/**
+ * Ustawienia anty-artefaktowe dla tekstur PNG (zwłaszcza z alphą) przy skalowaniu:
+ * - clamp do krawędzi (brak „szwów”/powtórek),
+ * - bez mipmap (eliminuje halo/„białe kreski” od premixu tła),
+ * - linear filtering dla stabilnego downscale.
+ */
+export const configureBadgeTexture = (tex: THREE.Texture, slot: TextureSlotKey | string): void => {
+  if (!tex) return;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  // Obraz jest premultiplied na CPU (textureAlphaFix) — nie podwajaj przy uploadzie
+  tex.premultiplyAlpha = false;
+
+  if (slot === 'map') {
+    sanitizeBadgeMapTextureWhenReady(tex);
+  }
+
+  if (slot === 'map' || slot === 'emissiveMap') {
+    tex.colorSpace = THREE.SRGBColorSpace;
+  }
+
+  tex.updateMatrix();
+  tex.needsUpdate = true;
+};
+
+/** Materiał z mapą PNG/alpha — blending pod premultiplied RGBA. */
+export const configureBadgeAlphaMaterial = (material: THREE.Material): void => {
+  if (!getPrimaryTexture(material)) return;
+  const m = material as THREE.MeshStandardMaterial;
+  if (!m.map) return;
+
+  sanitizeBadgeMapTextureWhenReady(m.map);
+  applyPremultipliedAlphaBlending(m);
+  if (typeof m.opacity === 'number' && m.opacity >= 1) {
+    m.opacity = 1;
+  }
+};
+
+/** Wymuś ponowną naprawę obwódki na mapie (np. po ręcznym kliknięciu w panelu). */
+export const repairBadgeMapTexture = (material: THREE.Material): boolean => {
+  const m = material as THREE.MeshStandardMaterial;
+  if (!m.map) return false;
+  const ok = sanitizeBadgeMapTexture(m.map, { force: true, premultiply: true });
+  if (ok) {
+    configureBadgeTexture(m.map, 'map');
+    configureBadgeAlphaMaterial(m);
+  }
+  return ok;
+};
 
 export interface MaterialEntry {
   uuid: string;
   name: string;
   hex: string;
   hasTexture: boolean;
+  texture?: TextureTransformState | null;
   meshNames: string[];
   type: string;
   metalness?: number;
@@ -50,8 +140,115 @@ const colorToHex = (color: THREE.Color | undefined | null): string => {
 };
 
 const hasMaterialTexture = (material: THREE.Material): boolean => {
-  const m = material as any;
-  return TEXTURE_KEYS.some((k) => m[k] != null);
+  return getPrimaryTexture(material) != null;
+};
+
+export const getPrimaryTexture = (material: THREE.Material): THREE.Texture | null => {
+  const m = material as THREE.MeshStandardMaterial;
+  for (const key of TEXTURE_KEYS) {
+    const tex = (m as any)[key] as THREE.Texture | undefined | null;
+    if (tex) return tex;
+  }
+  return null;
+};
+
+export const readTextureState = (texture: THREE.Texture): TextureTransformState => ({
+  repeatX: texture.repeat.x,
+  repeatY: texture.repeat.y,
+  offsetX: texture.offset.x,
+  offsetY: texture.offset.y,
+  rotation: texture.rotation,
+  wrapS: texture.wrapS,
+  wrapT: texture.wrapT,
+  flipY: texture.flipY
+});
+
+export const applyTextureState = (
+  texture: THREE.Texture,
+  patch: Partial<TextureTransformState>
+): void => {
+  if (typeof patch.repeatX === 'number') texture.repeat.x = patch.repeatX;
+  if (typeof patch.repeatY === 'number') texture.repeat.y = patch.repeatY;
+  if (typeof patch.offsetX === 'number') texture.offset.x = patch.offsetX;
+  if (typeof patch.offsetY === 'number') texture.offset.y = patch.offsetY;
+  if (typeof patch.rotation === 'number') texture.rotation = patch.rotation;
+  if (typeof patch.flipY === 'boolean') texture.flipY = patch.flipY;
+  // Zawsze clamp — repeat/mirror powoduje „dublowanie” i kreski na krawędziach
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.updateMatrix();
+  texture.needsUpdate = true;
+};
+
+const ensureEditableTexture = (material: THREE.Material): THREE.Texture | null => {
+  const m = material as THREE.MeshStandardMaterial;
+  const tex = getPrimaryTexture(material);
+  if (!tex) return null;
+  const slot = TEXTURE_KEYS.find((k) => (m as any)[k] === tex) || 'map';
+  if (!(tex as any).userData?._faEditClone) {
+    const cloned = tex.clone();
+    cloned.userData._faEditClone = true;
+    delete cloned.userData._faAlphaSanitized;
+    configureBadgeTexture(cloned, slot);
+    (m as any)[slot] = cloned;
+    if (slot === 'map') configureBadgeAlphaMaterial(m);
+    m.needsUpdate = true;
+  }
+  return getPrimaryTexture(material);
+};
+
+export const applyTextureChange = (
+  scene: THREE.Object3D | null | undefined,
+  materialUuid: string,
+  patch: Partial<TextureTransformState>
+): void => {
+  if (!scene) return;
+  scene.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !child.material) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    materials.forEach((mat) => {
+      if (mat.uuid !== materialUuid) return;
+      const tex = ensureEditableTexture(mat);
+      if (!tex) return;
+      applyTextureState(tex, patch);
+      const slot = TEXTURE_KEYS.find((k) => (mat as any)[k] === tex) || 'map';
+      configureBadgeTexture(tex, slot);
+      if (slot === 'map') configureBadgeAlphaMaterial(mat);
+      mat.needsUpdate = true;
+    });
+  });
+};
+
+export const textureStatesEqual = (
+  a: TextureTransformState | null | undefined,
+  b: TextureTransformState | null | undefined,
+  epsilon = 0.0001
+): boolean => {
+  if (!a || !b) return !a && !b;
+  return (
+    Math.abs(a.repeatX - b.repeatX) < epsilon &&
+    Math.abs(a.repeatY - b.repeatY) < epsilon &&
+    Math.abs(a.offsetX - b.offsetX) < epsilon &&
+    Math.abs(a.offsetY - b.offsetY) < epsilon &&
+    Math.abs(a.rotation - b.rotation) < epsilon &&
+    a.wrapS === b.wrapS &&
+    a.wrapT === b.wrapT &&
+    a.flipY === b.flipY
+  );
+};
+
+/** Ustaw repeat według proporcji obrazu (często koryguje rozciągnięcie). */
+export const applyImageAspectTextureFix = (material: THREE.Material): boolean => {
+  const tex = ensureEditableTexture(material);
+  if (!tex) return false;
+  const img = tex.image as { width?: number; height?: number } | undefined;
+  const w = img?.width;
+  const h = img?.height;
+  if (!w || !h) return false;
+  const aspect = w / h;
+  if (!Number.isFinite(aspect) || aspect <= 0) return false;
+  applyTextureState(tex, { repeatX: 1, repeatY: aspect });
+  return true;
 };
 
 const isColorMaterial = (material: THREE.Material): boolean => {
@@ -77,11 +274,13 @@ export const extractMaterials = (scene: THREE.Object3D | null | undefined): Mate
         }
         return;
       }
+      const primaryTex = getPrimaryTexture(mat);
       map.set(mat.uuid, {
         uuid: mat.uuid,
         name: mat.name || colorMat.type || 'Material',
         hex: colorToHex(colorMat.color),
-        hasTexture: hasMaterialTexture(mat),
+        hasTexture: primaryTex != null,
+        texture: primaryTex ? readTextureState(primaryTex) : null,
         meshNames: child.name ? [child.name] : [],
         type: mat.type,
         metalness: typeof anyMat.metalness === 'number' ? anyMat.metalness : undefined,
@@ -143,6 +342,8 @@ export interface MaterialColorChange {
   ior?: number;
   /** Materiał: thickness - MeshPhysicalMaterial */
   thickness?: number;
+  /** Transformacja mapy diffuse (`material.map`). */
+  texture?: Partial<TextureTransformState>;
   /**
    * Najpewniejsze dopasowanie: ścieżka w drzewie sceny + indeks materiału w danym mesh-u.
    * `meshPath` jest budowane z indeksów dzieci, np. "0/3/2".
@@ -244,9 +445,79 @@ const applyChanges = (root: THREE.Object3D, changes: MaterialColorChange[]): voi
         anyMat.thickness = change.thickness;
       }
 
+      if (change.texture) {
+        const tex = getPrimaryTexture(mat);
+        if (tex) applyTextureState(tex, change.texture);
+      }
+
       (mat as any).needsUpdate = true;
     });
   });
+};
+
+/** Wczytuje PNG/WebP jako teksturę mapy diffuse (z defringe). */
+export const createBadgeMapTextureFromFile = async (file: File): Promise<THREE.Texture> => {
+  const url = URL.createObjectURL(file);
+  try {
+    const loader = new THREE.TextureLoader();
+    const tex = await loader.loadAsync(url);
+    delete tex.userData._faAlphaSanitized;
+    configureBadgeTexture(tex, 'map');
+    return tex;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+};
+
+/** Podmienia `material.map` na nową teksturę (live preview). */
+export const applyMapTextureToMaterial = (
+  scene: THREE.Object3D,
+  materialUuid: string,
+  texture: THREE.Texture,
+  options?: { disposePreviousMap?: boolean }
+): void => {
+  scene.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !child.material) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    materials.forEach((mat) => {
+      if (mat.uuid !== materialUuid) return;
+      const m = mat as THREE.MeshStandardMaterial;
+      const prev = m.map;
+      if (prev && prev !== texture && options?.disposePreviousMap !== false) {
+        prev.dispose();
+      }
+      m.map = texture;
+      configureBadgeAlphaMaterial(m);
+      m.needsUpdate = true;
+    });
+  });
+};
+
+/** Eksport GLB z aktualnej sceny edycji (kolory, tekstury, wgrane PNG). */
+export const exportGLBFromScene = async (
+  scene: THREE.Object3D,
+  animations: THREE.AnimationClip[] = []
+): Promise<Blob> => {
+  const exporter = new GLTFExporter();
+  const result = await new Promise<ArrayBuffer>((resolve, reject) => {
+    exporter.parse(
+      scene,
+      (out) => {
+        if (out instanceof ArrayBuffer) {
+          resolve(out);
+        } else {
+          reject(new Error('GLTFExporter zwrócił JSON zamiast ArrayBuffer'));
+        }
+      },
+      (err) => reject(err),
+      {
+        binary: true,
+        embedImages: true,
+        animations
+      }
+    );
+  });
+  return new Blob([result], { type: 'model/gltf-binary' });
 };
 
 export interface ExportArgs {
@@ -254,6 +525,8 @@ export interface ExportArgs {
   originalUrl: string;
   /** Zmiany kolorów (podpis: name + originalHex). */
   changes: MaterialColorChange[];
+  /** Zmiany pozycji meshów (po meshPath). */
+  transformChanges?: MeshTransformChange[];
 }
 
 /**
@@ -263,7 +536,8 @@ export interface ExportArgs {
  */
 export const exportGLB = async ({
   originalUrl,
-  changes
+  changes,
+  transformChanges = []
 }: ExportArgs): Promise<Blob> => {
   // 1) Pobierz świeży GLB jako ArrayBuffer (omijając cache useGLTF/przeglądarki).
   const cacheBuster = `${originalUrl.includes('?') ? '&' : '?'}_export=${Date.now()}`;
@@ -281,6 +555,9 @@ export const exportGLB = async ({
 
   // 3) Nanieś zmiany kolorów (po stabilnym podpisie).
   applyChanges(gltf.scene, changes);
+
+  // 3b) Pozycje meshów (układ elementów).
+  applyTransformChanges(gltf.scene, transformChanges);
 
   // 4) Eksport jako GLB binary.
   const exporter = new GLTFExporter();

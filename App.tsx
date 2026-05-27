@@ -225,11 +225,11 @@ const App: React.FC = () => {
 
       <main className="flex-1 container mx-auto py-4 px-4 overflow-y-auto">
         <div className="h-full flex flex-col justify-center">
-          {viewMode === 'viewer' ? (
+          <div className={viewMode === 'viewer' ? 'h-full' : 'hidden'} aria-hidden={viewMode !== 'viewer'}>
             <Viewer badges={badges} onRefresh={refreshBadges} onRemove={handleRemove} />
-          ) : viewMode === 'list' ? (
-            <BadgeList badges={badges} />
-          ) : (
+          </div>
+          {viewMode === 'list' && <BadgeList badges={badges} />}
+          {viewMode === 'uploader' && (
             <Uploader
               badges={badges}
               onUpload={handleUpload}

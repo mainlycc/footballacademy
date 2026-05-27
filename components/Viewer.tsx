@@ -2,14 +2,40 @@
 import React, { useState, Suspense, useEffect, useRef, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
 import { Canvas, useThree } from '@react-three/fiber';
-import { Preload } from '@react-three/drei';
+import { Preload, useGLTF } from '@react-three/drei';
 import { Badge } from '../types';
 import Badge3D from './Badge3D';
 import BadgeColorPanel from './BadgeColorPanel';
-import { PLAYER_CATEGORIES, COACH_CATEGORIES, MANAGER_CATEGORIES, BadgeItem } from '../data';
-import { ChevronLeft, ChevronRight, Trophy, Loader2, Download, RotateCw, Sparkles, User, Briefcase, Award, Trash2, Image, FileCode } from 'lucide-react';
+import AdminLightingPanel from './AdminLightingPanel';
+import AdminMeshLayoutPanel from './AdminMeshLayoutPanel';
+import LayoutMarqueeBridge, { type LayoutMarqueeBridgeHandle } from './LayoutMarqueeBridge';
+import LayoutMarqueeOverlay from './LayoutMarqueeOverlay';
+import { BadgeItem } from '../data';
+import { ChevronLeft, ChevronRight, Trophy, Loader2, Download, RotateCw, Sparkles, User, Briefcase, Award, Trash2, Image, FileCode, Palette, Sun, LayoutGrid } from 'lucide-react';
 import { findMatchingBadge, normalize } from '../utils/badgeMatching';
 import { useAdminMode, disableAdminMode } from '../utils/adminMode';
+import { useBadgeLightingConfig } from '../utils/badgeLightingConfig';
+import { useCatalogOverrides } from '../hooks/useCatalogOverrides';
+import {
+  CatalogTab,
+  getCatalogItemKey,
+  getCategoriesForTab,
+  getEffectiveItem,
+} from '../utils/catalogOverrides';
+import { loadViewerPosition, saveViewerPosition } from '../utils/viewerPosition';
+import {
+  getCatalogMatchingItem,
+  usesExactCatalogMatching,
+} from '../utils/catalogDisambiguation';
+
+type TextureDragApi = {
+  /** Czy panel ma aktywną grupę do przeciągania. */
+  isEnabled: () => boolean;
+  onPointerDown: (e: any) => void;
+  onPointerMove: (e: any) => void;
+  onPointerUp: (e: any) => void;
+  onPointerLeave: (e: any) => void;
+};
 
 interface ViewerProps {
   badges: Badge[];
@@ -17,7 +43,8 @@ interface ViewerProps {
   onRemove?: (id: string) => Promise<void>;
 }
 
-type TabType = 'zawodnik' | 'trener' | 'manager';
+type TabType = CatalogTab;
+type AdminPanelTab = 'kolory' | 'swiatlo' | 'uklad';
 
 // Komponent wewnętrzny do przechwycenia renderera z Canvas
 const CanvasCapture: React.FC<{ 
@@ -88,8 +115,16 @@ const CanvasCapture: React.FC<{
 };
 
 const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
+  const savedPositionRef = useRef(loadViewerPosition());
   const adminMode = useAdminMode();
+  const { overrides } = useCatalogOverrides();
+  const { config: lightingConfig, update: updateLightingConfig, reset: resetLightingConfig } = useBadgeLightingConfig();
+  const [adminPanelTab, setAdminPanelTab] = useState<AdminPanelTab>('kolory');
+  const textureDragApiRef = useRef<TextureDragApi | null>(null);
   const [editScene, setEditScene] = useState<THREE.Object3D | null>(null);
+  const [marqueeSelectedMeshes, setMarqueeSelectedMeshes] = useState<Set<string>>(new Set());
+  const layoutMarqueeBridgeRef = useRef<LayoutMarqueeBridgeHandle | null>(null);
+  const layoutModeActive = adminMode && adminPanelTab === 'uklad';
   const [currentIndex, setCurrentIndex] = useState(0);
   const [spinTrigger, setSpinTrigger] = useState(0);
   const [isLit, setIsLit] = useState(false);
@@ -97,9 +132,11 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
   const [isDownloadingPNG, setIsDownloadingPNG] = useState(false);
   const [isDownloadingSVG, setIsDownloadingSVG] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabType>('zawodnik');
+  const [activeTab, setActiveTab] = useState<TabType>(savedPositionRef.current.activeTab);
   const [showTooltip, setShowTooltip] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const badgeLoadTokenRef = useRef(0);
+  const activeCatalogItemRef = useRef<HTMLButtonElement | null>(null);
 
   // Reset sceny edycji gdy zmienia się odznaka lub tryb admina.
   const handleSceneReady = useCallback((scene: THREE.Object3D) => {
@@ -109,6 +146,25 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
   useEffect(() => {
     if (!adminMode) setEditScene(null);
   }, [adminMode]);
+
+  useEffect(() => {
+    if (!adminMode) setAdminPanelTab('kolory');
+  }, [adminMode]);
+
+  useEffect(() => {
+    if (!layoutModeActive) setMarqueeSelectedMeshes(new Set());
+  }, [layoutModeActive]);
+
+  const handleMarqueeSelection = useCallback((paths: string[], additive: boolean) => {
+    setMarqueeSelectedMeshes((prev) => {
+      if (additive) {
+        const next = new Set(prev);
+        paths.forEach((p) => next.add(p));
+        return next;
+      }
+      return new Set(paths);
+    });
+  }, []);
   
   // Ref do przechowywania funkcji pobierania PNG z komponentu Canvas
   const downloadPNGRef = useRef<((badgeName: string) => void) | null>(null);
@@ -122,62 +178,164 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
     item: BadgeItem;
     badge: Badge | null;
     label: string;
+    categoryTitle: string;
+    itemKey: string;
   }
+
+  const persistViewerPosition = useCallback(
+    (tab: TabType, index: number, items: BadgeItemWithMatch[]) => {
+      const row = items[index];
+      if (!row) return;
+      savedPositionRef.current = {
+        activeTab: tab,
+        itemKeyByTab: {
+          ...savedPositionRef.current.itemKeyByTab,
+          [tab]: row.itemKey,
+        },
+      };
+      saveViewerPosition(savedPositionRef.current);
+    },
+    []
+  );
+
+  const restoreIndexForTab = useCallback(
+    (tab: TabType, items: BadgeItemWithMatch[]): number => {
+      if (!items.length) return 0;
+      const key = savedPositionRef.current.itemKeyByTab[tab];
+      if (!key) return 0;
+      const idx = items.findIndex((i) => i.itemKey === key);
+      return idx >= 0 ? idx : 0;
+    },
+    []
+  );
 
   // Filtrowanie wszystkich items z kategorii - pokazujemy wszystkie, także te bez odznak
   // UWAGA: Ta sama odznaka może pasować do wielu items (jak w BadgeList)
   const allItems = useMemo(() => {
-    const currentCategories = 
-      activeTab === 'zawodnik' ? PLAYER_CATEGORIES :
-      activeTab === 'trener' ? COACH_CATEGORIES : 
-      MANAGER_CATEGORIES;
-
     const items: BadgeItemWithMatch[] = [];
 
-    // Przejdź przez wszystkie kategorie i pozycje w kolejności
-    // Dodaj WSZYSTKIE items, także te bez dopasowanych odznak
-    // Używamy tej samej logiki co BadgeList - każdy item który pasuje pokazuje odznakę
-    currentCategories.forEach(category => {
-      category.items.forEach(item => {
-        const label = typeof item === 'string' ? item : item.label;
-        const matchedBadge = findMatchingBadge(item, badges);
-        
+    getCategoriesForTab(activeTab).forEach((category) => {
+      category.items.forEach((rawItem) => {
+        const effectiveItem = getEffectiveItem(activeTab, category.title, rawItem, overrides);
+        const matchingItem = getCatalogMatchingItem(effectiveItem, category.title);
+        const label =
+          typeof matchingItem === 'string' ? matchingItem : matchingItem.label;
+        const matchedBadge = findMatchingBadge(matchingItem, badges, {
+          exact: usesExactCatalogMatching(effectiveItem, category.title),
+        });
+
         items.push({
-          item,
-          badge: matchedBadge, // Używamy bezpośrednio matchedBadge, bez filtrowania po usedBadgeIds
-          label
+          item: effectiveItem,
+          badge: matchedBadge,
+          label,
+          categoryTitle: category.title,
+          itemKey: getCatalogItemKey(activeTab, category.title, rawItem),
         });
       });
     });
 
     return items;
-  }, [badges, activeTab]);
-  
-  // Liczba items z dopasowanymi odznakami (tak jak w BadgeList, dla spójności)
+  }, [badges, activeTab, overrides]);
+
+  const bumpBadgeLoad = useCallback(() => {
+    badgeLoadTokenRef.current += 1;
+    setIsLoading(true);
+    return badgeLoadTokenRef.current;
+  }, []);
+
+  const finishBadgeLoad = useCallback((token: number) => {
+    if (token === badgeLoadTokenRef.current) setIsLoading(false);
+  }, []);
+
+  const itemHasRenderableBadge = useCallback((item: BadgeItemWithMatch | undefined) => {
+    const url = item?.badge?.url?.trim();
+    return Boolean(url && url.length > 0);
+  }, []);
+
+  const jumpToIndex = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= allItems.length || index === currentIndex) return;
+      const target = allItems[index];
+      if (itemHasRenderableBadge(target)) bumpBadgeLoad();
+      else setIsLoading(false);
+      setCurrentIndex(index);
+    },
+    [allItems, currentIndex, bumpBadgeLoad, itemHasRenderableBadge]
+  );
+
+  // Preload GLB w tle — szybsze skoki między odznakami
+  useEffect(() => {
+    const urls = new Set<string>();
+    allItems.forEach((item) => {
+      const url = item.badge?.url?.trim();
+      if (url) urls.add(url);
+    });
+    urls.forEach((url) => {
+      try {
+        useGLTF.preload(url);
+      } catch {
+        /* ignore preload errors */
+      }
+    });
+  }, [allItems]);
+
+  useEffect(() => {
+    activeCatalogItemRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [currentIndex, activeTab]);
+
   const itemsWithBadges = useMemo(() => {
-    const currentCategories = 
-      activeTab === 'zawodnik' ? PLAYER_CATEGORIES :
-      activeTab === 'trener' ? COACH_CATEGORIES : 
-      MANAGER_CATEGORIES;
-    
     let count = 0;
-    currentCategories.forEach(cat => {
-      cat.items.forEach(item => {
-        if (findMatchingBadge(item, badges)) {
+    getCategoriesForTab(activeTab).forEach((cat) => {
+      cat.items.forEach((rawItem) => {
+        const eff = getEffectiveItem(activeTab, cat.title, rawItem, overrides);
+        if (
+          findMatchingBadge(getCatalogMatchingItem(eff, cat.title), badges, {
+            exact: usesExactCatalogMatching(eff, cat.title),
+          })
+        )
           count++;
-        }
       });
     });
     return count;
-  }, [badges, activeTab]);
+  }, [badges, activeTab, overrides]);
 
   const lastBadgeId = useRef<string | null>(null);
-  
-  // Resetuj index gdy zmienia się tab
+  const hasInitialRestoreRef = useRef(false);
+  const prevActiveTabRef = useRef(activeTab);
+
+  // Przy starcie i zmianie zakładki — przywróć ostatnią pozycję (nie przy każdym odświeżeniu badges)
   useEffect(() => {
-    setCurrentIndex(0);
-    lastBadgeId.current = null;
-  }, [activeTab]);
+    if (!allItems.length) return;
+
+    const tabChanged = prevActiveTabRef.current !== activeTab;
+    prevActiveTabRef.current = activeTab;
+
+    if (!hasInitialRestoreRef.current || tabChanged) {
+      hasInitialRestoreRef.current = true;
+      const idx = restoreIndexForTab(activeTab, allItems);
+      if (itemHasRenderableBadge(allItems[idx])) bumpBadgeLoad();
+      else setIsLoading(false);
+      setCurrentIndex(idx);
+      if (tabChanged) lastBadgeId.current = null;
+    }
+  }, [activeTab, allItems, restoreIndexForTab, bumpBadgeLoad, itemHasRenderableBadge]);
+
+  // Zapisuj bieżącą odznakę (localStorage)
+  useEffect(() => {
+    if (!allItems.length) return;
+    persistViewerPosition(activeTab, currentIndex, allItems);
+  }, [activeTab, currentIndex, allItems, persistViewerPosition]);
+
+  const handleActiveTabChange = useCallback(
+    (tab: TabType) => {
+      if (tab === activeTab) return;
+      persistViewerPosition(activeTab, currentIndex, allItems);
+      savedPositionRef.current.activeTab = tab;
+      saveViewerPosition(savedPositionRef.current);
+      setActiveTab(tab);
+    },
+    [activeTab, currentIndex, allItems, persistViewerPosition]
+  );
   
   // Ref do zapamiętania nazwy odznaki przed usunięciem (do znalezienia następnej o tej samej nazwie)
   const nextBadgeNameRef = useRef<string | null>(null);
@@ -256,10 +414,37 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
 
     if (isNewBadge) {
       lastBadgeId.current = currentBadge.id;
-      setIsLit(false); // Reset illumination on badge change
-      setIsLoading(true); // Reset loading state on badge change
+      setIsLit(false);
     }
   }, [currentBadge?.id, hasBadge]);
+
+  const badgeLoadTokenForRender = badgeLoadTokenRef.current;
+
+  const goNext = useCallback(() => {
+    if (!allItems.length) return;
+    jumpToIndex((currentIndex + 1) % allItems.length);
+  }, [allItems.length, currentIndex, jumpToIndex]);
+
+  const goPrev = useCallback(() => {
+    if (!allItems.length) return;
+    jumpToIndex((currentIndex - 1 + allItems.length) % allItems.length);
+  }, [allItems.length, currentIndex, jumpToIndex]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        goNext();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        goPrev();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [goNext, goPrev]);
 
   if (allItems.length === 0) {
     return (
@@ -282,14 +467,6 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
 
   const toggleLight = () => {
     setIsLit(prev => !prev);
-  };
-
-  const next = () => {
-    setCurrentIndex((prev) => (prev + 1) % allItems.length);
-  };
-  
-  const prev = () => {
-    setCurrentIndex((prev) => (prev - 1 + allItems.length) % allItems.length);
   };
 
   const handleDownloadGLB = async () => {
@@ -413,9 +590,12 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
   return (
     <div className={`w-full ${adminMode ? 'max-w-[1500px]' : 'max-w-7xl'} mx-auto flex flex-col md:flex-row items-stretch gap-6 h-[75vh]`}>
       <div className="relative flex-[3] bg-black rounded-[40px] border border-white/10 overflow-hidden shadow-2xl group/viewer">
+        {layoutModeActive && hasBadge && (
+          <LayoutMarqueeOverlay bridgeRef={layoutMarqueeBridgeRef} enabled={layoutModeActive} />
+        )}
         {/* Loader overlay - pokazuj tylko gdy jest odznaka */}
         {isLoading && hasBadge && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none">
             <div className="flex flex-col items-center gap-4">
               <Loader2 className="w-12 h-12 text-blue-400 animate-spin" />
               <span className="text-blue-300 font-anton uppercase tracking-widest text-sm">Ładowanie odznaki...</span>
@@ -427,7 +607,7 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
             camera={{ position: [0, 0, 4], fov: 45 }} 
             dpr={[1, 2]} 
             shadows
-            gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
+            gl={{ alpha: true, premultipliedAlpha: false, antialias: true, preserveDrawingBuffer: true }}
             onPointerMissed={() => setIsLit(false)}
           >
             <Suspense fallback={null}>
@@ -435,6 +615,13 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
                 onCaptureReady={(fn) => { downloadPNGRef.current = fn; }} 
                 onSVGCaptureReady={(fn) => { downloadSVGRef.current = fn; }}
               />
+              {layoutModeActive && editScene && (
+                <LayoutMarqueeBridge
+                  ref={layoutMarqueeBridgeRef}
+                  scene={editScene}
+                  onSelection={handleMarqueeSelection}
+                />
+              )}
               <Badge3D 
                 key={currentBadge.id}
                 url={badgeUrl} 
@@ -444,12 +631,56 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
                 hideShadows={isCapturing}
                 adminMode={adminMode}
                 onSceneReady={adminMode ? handleSceneReady : undefined}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  setIsLit(true);
-                  handleSpin();
-                }}
-                onLoadComplete={() => setIsLoading(false)}
+                lightingConfig={lightingConfig}
+                onPointerDown={
+                  layoutModeActive
+                    ? undefined
+                    : (e) => {
+                        // Tryb kolory: jeśli panel ma aktywne „przesuwanie myszką”, deleguj drag.
+                        const api = textureDragApiRef.current;
+                        if (adminMode && adminPanelTab === 'kolory' && api?.isEnabled()) {
+                          e.stopPropagation();
+                          api.onPointerDown(e);
+                          return;
+                        }
+                        e.stopPropagation();
+                        setIsLit(true);
+                        handleSpin();
+                      }
+                }
+                onPointerMove={
+                  layoutModeActive
+                    ? undefined
+                    : (e) => {
+                        const api = textureDragApiRef.current;
+                        if (adminMode && adminPanelTab === 'kolory' && api?.isEnabled()) {
+                          e.stopPropagation();
+                          api.onPointerMove(e);
+                        }
+                      }
+                }
+                onPointerUp={
+                  layoutModeActive
+                    ? undefined
+                    : (e) => {
+                        const api = textureDragApiRef.current;
+                        if (adminMode && adminPanelTab === 'kolory' && api?.isEnabled()) {
+                          e.stopPropagation();
+                          api.onPointerUp(e);
+                        }
+                      }
+                }
+                onPointerLeave={
+                  layoutModeActive
+                    ? undefined
+                    : (e) => {
+                        const api = textureDragApiRef.current;
+                        if (adminMode && adminPanelTab === 'kolory' && api?.isEnabled()) {
+                          api.onPointerLeave(e);
+                        }
+                      }
+                }
+                onLoadComplete={() => finishBadgeLoad(badgeLoadTokenForRender)}
               />
               <Preload all />
             </Suspense>
@@ -468,13 +699,13 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
           </div>
         )}
 
-        <div className="absolute inset-y-0 left-0 flex items-center px-6 pointer-events-none">
-          <button onClick={prev} className="pointer-events-auto p-4 bg-black/40 hover:bg-white text-white hover:text-black rounded-full border border-white/10 backdrop-blur-md transition-all shadow-xl active:scale-90">
+        <div className="absolute inset-y-0 left-0 z-50 flex items-center px-6 pointer-events-none">
+          <button onClick={goPrev} className="pointer-events-auto p-4 bg-black/40 hover:bg-white text-white hover:text-black rounded-full border border-white/10 backdrop-blur-md transition-all shadow-xl active:scale-90">
             <ChevronLeft className="w-8 h-8" />
           </button>
         </div>
-        <div className="absolute inset-y-0 right-0 flex items-center px-6 pointer-events-none">
-          <button onClick={next} className="pointer-events-auto p-4 bg-black/40 hover:bg-white text-white hover:text-black rounded-full border border-white/10 backdrop-blur-md transition-all shadow-xl active:scale-90">
+        <div className="absolute inset-y-0 right-0 z-50 flex items-center px-6 pointer-events-none">
+          <button onClick={goNext} className="pointer-events-auto p-4 bg-black/40 hover:bg-white text-white hover:text-black rounded-full border border-white/10 backdrop-blur-md transition-all shadow-xl active:scale-90">
             <ChevronRight className="w-8 h-8" />
           </button>
         </div>
@@ -603,7 +834,7 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleActiveTabChange(tab.id)}
                 className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-bold uppercase text-[9px] tracking-widest transition-all ${
                   activeTab === tab.id 
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' 
@@ -619,32 +850,120 @@ const Viewer: React.FC<ViewerProps> = ({ badges, onRefresh, onRemove }) => {
           <div className="flex items-center justify-between text-blue-400 font-bold uppercase tracking-[0.4em] text-[10px]">
              <span className="flex items-center gap-2"><Trophy className="w-3 h-3" /> KOLEKCJA {currentIndex + 1} / {allItems.length}</span>
           </div>
-          <div className="flex gap-1.5">
-            {allItems.map((item, idx) => (
-              <div 
-                key={idx} 
-                className={`h-1 rounded-full transition-all duration-300 ${idx === currentIndex ? 'flex-1 bg-white' : 'w-2 '} ${item.badge ? 'bg-white/10' : 'bg-red-500/30'}`} 
-                title={item.badge ? item.label : `${item.label} - brak odznaki`}
-              />
-            ))}
+          <div
+            className="max-h-36 overflow-y-auto overflow-x-hidden rounded-xl border border-white/10 bg-black/30 p-1 space-y-0.5"
+            role="listbox"
+            aria-label="Lista odznak w kolekcji"
+          >
+            {allItems.map((item, idx) => {
+              const isActive = idx === currentIndex;
+              const hasItemBadge = Boolean(item.badge?.url?.trim());
+              const showCategory =
+                idx === 0 || allItems[idx - 1].categoryTitle !== item.categoryTitle;
+              return (
+                <React.Fragment key={item.itemKey}>
+                  {showCategory && (
+                    <div className="px-2 pt-2 pb-0.5 text-[8px] font-bold uppercase tracking-widest text-blue-400/80 sticky top-0 bg-black/90 backdrop-blur-sm z-10">
+                      {item.categoryTitle}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    ref={isActive ? activeCatalogItemRef : undefined}
+                    onClick={() => jumpToIndex(idx)}
+                    title={hasItemBadge ? item.label : `${item.label} — brak odznaki w bazie`}
+                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-medium leading-tight transition-all truncate ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : hasItemBadge
+                          ? 'text-gray-300 hover:bg-white/10'
+                          : 'text-red-300/70 hover:bg-red-500/10'
+                    }`}
+                  >
+                    <span className="block truncate">{item.label}</span>
+                  </button>
+                </React.Fragment>
+              );
+            })}
           </div>
+          <p className="text-[9px] text-gray-500 uppercase tracking-wider">
+            Kliknij pozycję lub użyj ← → — nie musisz czekać na załadowanie
+          </p>
         </div>
       </div>
 
       {adminMode && (
-        <div className="w-full md:w-[360px] flex-shrink-0 bg-blue-950/60 backdrop-blur-xl border border-amber-400/20 rounded-[32px] shadow-2xl p-4 overflow-hidden flex flex-col gap-2">
+        <div className="w-full md:w-[380px] flex-shrink-0 bg-blue-950/60 backdrop-blur-xl border border-amber-400/20 rounded-[32px] shadow-2xl p-4 overflow-hidden flex flex-col gap-2 min-h-0">
           <button
             type="button"
             onClick={() => disableAdminMode()}
             className="shrink-0 text-[9px] font-bold uppercase tracking-widest text-blue-200/70 hover:text-white py-2 px-2 rounded-lg border border-white/10 hover:bg-white/5 transition text-left"
           >
-            Wyłącz edycję kolorów
+            Wyłącz tryb admina
           </button>
-          <BadgeColorPanel
-            badge={hasBadge ? currentBadge : null}
-            scene={editScene}
-            onSaved={onRefresh}
-          />
+          <div className="flex p-1 bg-black/40 rounded-xl border border-white/10 shrink-0">
+            <button
+              type="button"
+              onClick={() => setAdminPanelTab('kolory')}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg font-bold uppercase text-[9px] tracking-widest transition-all ${
+                adminPanelTab === 'kolory'
+                  ? 'bg-amber-500/90 text-black shadow-lg'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Palette className="w-3 h-3" /> Kolory
+            </button>
+            <button
+              type="button"
+              onClick={() => setAdminPanelTab('swiatlo')}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg font-bold uppercase text-[9px] tracking-widest transition-all ${
+                adminPanelTab === 'swiatlo'
+                  ? 'bg-amber-500/90 text-black shadow-lg'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Sun className="w-3 h-3" /> Światło
+            </button>
+            <button
+              type="button"
+              onClick={() => setAdminPanelTab('uklad')}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg font-bold uppercase text-[9px] tracking-widest transition-all ${
+                adminPanelTab === 'uklad'
+                  ? 'bg-amber-500/90 text-black shadow-lg'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <LayoutGrid className="w-3 h-3" /> Układ
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
+            {adminPanelTab === 'kolory' ? (
+              <BadgeColorPanel
+                badge={hasBadge ? currentBadge : null}
+                scene={editScene}
+                onSaved={onRefresh}
+                onTextureDragApi={(api) => {
+                  textureDragApiRef.current = api;
+                }}
+              />
+            ) : adminPanelTab === 'swiatlo' ? (
+              <AdminLightingPanel
+                config={lightingConfig}
+                onChange={updateLightingConfig}
+                onReset={resetLightingConfig}
+              />
+            ) : (
+              <AdminMeshLayoutPanel
+                badge={hasBadge ? currentBadge : null}
+                scene={editScene}
+                marqueeSelectedMeshes={marqueeSelectedMeshes}
+                onMarqueeMeshesChange={setMarqueeSelectedMeshes}
+                onSaved={onRefresh}
+              />
+            )}
+          </div>
         </div>
       )}
     </div>
